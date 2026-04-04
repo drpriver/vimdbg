@@ -173,14 +173,16 @@ _pending_bp_signs: dict[SignLoc, int] = {}
 _active_popup = None  # type: _Popup | None
 
 class _Popup:
-    def __init__(self, entries:list[str], title:str, on_select, maxheight:int=20, minwidth:int=40) -> None:
+    def __init__(self, entries:list[str], title:str, on_select, on_delete=None, maxheight:int=20, minwidth:int=40) -> None:
         self.on_select = on_select
+        self.on_delete = on_delete
+        self.entries = entries
         self.count = len(entries)
         self.cursor = 0
         list_str = "[" + ",".join(entries) + "]"
         opts = (f"{{'title':' {title} ','border':[1,1,1,1],"
                 f"'maxheight':{maxheight},'minwidth':{minwidth},"
-                f"'cursorline':1,'wrap':0,"
+                f"'cursorline':1,'wrap':0,'mapping':0,"
                 f"'filter':'VimdbgPopupFilter','callback':'VimdbgPopupClose'}}")
         self.winid = int(vim.eval(f"popup_create({list_str}, {opts})"))
 
@@ -193,12 +195,32 @@ class _Popup:
         vim.command(f"call popup_close({self.winid})")
         self.on_select(idx)
 
+    def delete(self) -> None:
+        if self.on_delete is None or self.count == 0:
+            return
+        idx = self.cursor
+        self.on_delete(idx)
+        del self.entries[idx]
+        self.count -= 1
+        if self.count == 0:
+            self.close()
+            return
+        if self.cursor >= self.count:
+            self.cursor = self.count - 1
+        list_str = "[" + ",".join(self.entries) + "]"
+        vim.command(f"call popup_settext({self.winid}, {list_str})")
+        vim.command(f"call win_execute({self.winid}, 'normal! {self.cursor + 1}G')")
+
     def close(self) -> None:
         vim.command(f"call popup_close({self.winid})")
 
 def _popup_move(delta:int) -> None:
     if _active_popup is not None:
         _active_popup.move(delta)
+
+def _popup_delete() -> None:
+    if _active_popup is not None:
+        _active_popup.delete()
 
 def _popup_select() -> None:
     global _active_popup
@@ -210,11 +232,11 @@ def _popup_closed() -> None:
     global _active_popup
     _active_popup = None
 
-def _show_popup(entries:list[str], title:str, on_select, **kwargs) -> None:
+def _show_popup(entries:list[str], title:str, on_select, on_delete=None, **kwargs) -> None:
     global _active_popup
     if _active_popup is not None:
         _active_popup.close()
-    _active_popup = _Popup(entries, title, on_select, **kwargs)
+    _active_popup = _Popup(entries, title, on_select, on_delete=on_delete, **kwargs)
 
 def _find_source_win() -> int:
     for w in vim.windows:
@@ -230,6 +252,7 @@ class DebugState:
         self.dbg_line_buf: int|None = None
         self.dbg_line: int|None = None
         self.bp_signs: dict[SignLoc, int] = {}
+        self.bp_locs: dict[SignLoc, Location] = {}  # reverse map for breakpoint popup
 
     def _send(self, template:str, **kwargs) -> None:
         quoted = {k: self.flavor.quote(v) if isinstance(v, str) else v
@@ -254,9 +277,11 @@ class DebugState:
             self._send(self.flavor.breakpoint_del, **self._loc_kwargs(loc))
             vim.command(f"sign unplace {self.bp_signs[key]} buffer={bufnr}")
             del self.bp_signs[key]
+            self.bp_locs.pop(key, None)
         else:
             self._send(self.flavor.breakpoint_set, **self._loc_kwargs(loc))
             self._place_bp_sign(loc.linenumber)
+            self.bp_locs[key] = loc
 
     def breakpoint_func(self) -> None:
         cword = vim.eval("expand('<cword>')")
@@ -464,10 +489,13 @@ class DebugState:
                 _next_sign_id += 1
                 vim.command(f"sign place {sid} line={line} name=dbgbreak buffer={bufnr}")
                 self.bp_signs[key] = sid
+            abspath = os.path.abspath(path)
+            self.bp_locs[key] = Location(line, path, abspath)
         for key in list(self.bp_signs):
             if key not in new_keys:
                 vim.command(f"sign unplace {self.bp_signs[key]} buffer={key.bufnr}")
                 del self.bp_signs[key]
+                self.bp_locs.pop(key, None)
 
 
 state = None
@@ -521,6 +549,7 @@ _NMAPS = [
     ('t',             ':python3 vimdbg.trace()<CR>'),
     ('P',             ':python3 vimdbg.locals()<CR>'),
     ('T',             ':python3 vimdbg.threads()<CR>'),
+    ('K',             ':python3 vimdbg.show_breakpoints()<CR>'),
     ('<leader><esc>', ':python3 vimdbg.remove_mappings()<CR>'),
     ('R',             ':python3 vimdbg.run()<CR>'),
     ('I',             '<Nop>'),
@@ -617,6 +646,69 @@ def persistent_breakpoint() -> None:
             _next_sign_id += 1
             vim.command(f"sign place {sid} line={loc.linenumber} name=dbgbreak buffer={bufnr}")
             _pending_bp_signs[key] = sid
+
+def show_breakpoints() -> None:
+    # Gather all breakpoints: pending + live debugger
+    seen: set[tuple[str, int]] = set()
+    locs: list[Location] = []
+    is_persistent: list[bool] = []
+    for loc in _pending_breakpoints:
+        key = (loc.abspath, loc.linenumber)
+        if key not in seen:
+            seen.add(key)
+            locs.append(loc)
+            is_persistent.append(True)
+    if state:
+        for sl, loc in state.bp_locs.items():
+            key = (loc.abspath, loc.linenumber)
+            if key not in seen:
+                seen.add(key)
+                locs.append(loc)
+                is_persistent.append(False)
+    if not locs:
+        vim.command("echo 'No breakpoints'")
+        return
+    entries = []
+    for i, loc in enumerate(locs):
+        short = os.path.basename(loc.filename)
+        marker = '*' if is_persistent[i] else ' '
+        preview = ''
+        bufnr = int(vim.eval(f"bufnr('{loc.abspath}')"))
+        if bufnr != -1:
+            lines = vim.eval(f"getbufline({bufnr}, {loc.linenumber})")
+            if lines:
+                preview = '  ' + lines[0].strip()
+                if len(preview) > 60:
+                    preview = preview[:57] + '...'
+        location = f"{short}:{loc.linenumber}"
+        text = f"{marker} {location}{preview}".replace("'", "''")
+        lc = len(f"{marker} ") + 1
+        ll = len(location)
+        props = f"[{{'col':{lc},'length':{ll},'type':'bt_loc'}}]"
+        entries.append(f"{{'text':'{text}','props':{props}}}")
+    def on_select(idx):
+        loc = locs[idx]
+        vim.command(f"call win_gotoid({src_win()})")
+        vim.command(f"silent! edit {loc.abspath}")
+        vim.command(f"silent! {loc.linenumber}")
+        vim.command("normal! zv")
+        vim.command("normal! zz")
+    def on_delete(idx):
+        loc = locs.pop(idx)
+        persistent = is_persistent.pop(idx)
+        bufnr = int(vim.eval(f"bufnr('{loc.abspath}')"))
+        key = SignLoc(bufnr, loc.linenumber)
+        if persistent:
+            _pending_breakpoints.pop(loc, None)
+            if key in _pending_bp_signs:
+                vim.command(f"sign unplace {_pending_bp_signs[key]} buffer={bufnr}")
+                del _pending_bp_signs[key]
+        if state and key in state.bp_signs:
+            state._send(state.flavor.breakpoint_del, **state._loc_kwargs(loc))
+            vim.command(f"sign unplace {state.bp_signs[key]} buffer={bufnr}")
+            del state.bp_signs[key]
+            state.bp_locs.pop(key, None)
+    _show_popup(entries, 'breakpoints', on_select, on_delete=on_delete)
 
 _mod = __import__('sys').modules[__name__]
 for _name in (n for n in dir(DebugState) if not n.startswith('_')):

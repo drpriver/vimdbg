@@ -70,6 +70,9 @@ function g:VimdbgPopupFilter(winid, key)
     elseif a:key ==# "\<CR>"
         python3 vimdbg._popup_select()
         return 1
+    elseif a:key ==# 'd'
+        python3 vimdbg._popup_delete()
+        return 1
     elseif a:key ==# "\<Esc>" || a:key ==# 'q' || a:key ==# 'x'
         call popup_close(a:winid)
         return 1

@@ -26,6 +26,7 @@ Active in debug mode:~
   P             locals popup
   t             backtrace popup
   T             threads popup
+  K             breakpoints popup (d to delete, enter to jump)
   u             frame up
   d             frame down
   R             run (restart program)

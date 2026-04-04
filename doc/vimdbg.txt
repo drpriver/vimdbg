@@ -22,7 +22,7 @@ Active in debug mode:~
   r             one-shot breakpoint
   <CR>          run to cursor
   p             inspect variable
-  e             evaluate expression
+  =             evaluate expression
   P             locals popup
   t             backtrace popup
   T             threads popup

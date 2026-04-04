@@ -538,7 +538,7 @@ _NMAPS = [
     ('r',             ':python3 vimdbg.oneshot_breakpoint()<CR>'),
     ('<cr>',          ':python3 vimdbg.run_to()<CR>'),
     ('p',             ':python3 vimdbg.print_ident()<CR>'),
-    ('e',             ':python3 vimdbg.eval_expr()<CR>'),
+    ('=',             ':python3 vimdbg.eval_expr()<CR>'),
     ('u',             ':python3 vimdbg.up()<CR>'),
     ('d',             ':python3 vimdbg.down()<CR>', '<nowait>'),
     ('s',             ':python3 vimdbg.step()<CR>'),
@@ -546,8 +546,8 @@ _NMAPS = [
     ('x',             ':python3 vimdbg.stop()<CR>'),
     ('c',             ':python3 vimdbg.cont()<CR>'),
     ('o',             ':python3 vimdbg.stepout()<CR>'),
-    ('t',             ':python3 vimdbg.trace()<CR>'),
     ('P',             ':python3 vimdbg.locals()<CR>'),
+    ('t',             ':python3 vimdbg.trace()<CR>'),
     ('T',             ':python3 vimdbg.threads()<CR>'),
     ('K',             ':python3 vimdbg.show_breakpoints()<CR>'),
     ('<leader><esc>', ':python3 vimdbg.remove_mappings()<CR>'),
@@ -562,7 +562,7 @@ _NMAPS = [
 ]
 _VMAPS = [
     ('p', ':python3 vimdbg.print_selection()<CR>'),
-    ('e', ':python3 vimdbg.print_selection()<CR>'),
+    ('=', ':python3 vimdbg.print_selection()<CR>'),
     ('c', '<Nop>'),
     ('s', '<Nop>'),
     ('C', '<Nop>'),

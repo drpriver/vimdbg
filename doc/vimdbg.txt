@@ -1,0 +1,68 @@
+*vimdbg.txt*  Minimal debugger frontend for Vim
+
+                              VIMDBG
+
+Debug mode activates automatically when the debugger hits a
+breakpoint. Exit with <leader><esc>.
+
+==============================================================================
+KEYBINDINGS                                          *vimdbg-keys*
+
+Always available:~
+
+  <F8>          toggle pending breakpoint
+
+Active in debug mode:~
+
+  n             next (step over)
+  s             step into
+  o             step out
+  c             continue
+  a             toggle breakpoint
+  r             one-shot breakpoint
+  <CR>          run to cursor
+  p             inspect variable
+  e             evaluate expression
+  P             locals popup
+  t             backtrace popup
+  T             threads popup
+  u             frame up
+  d             frame down
+  R             run (restart program)
+  q             quit debugger
+  x             kill program
+  <leader><esc> exit debug mode (keep debugger running)
+
+==============================================================================
+PENDING BREAKPOINTS                                  *vimdbg-pending*
+
+Use <F8> to set breakpoints before the debugger is running.
+Pending breakpoints are not activated until the debugger processes a stop
+hook, so you still need to break the program manually in some way.
+
+==============================================================================
+REQUIREMENTS                                         *vimdbg-requirements*
+
+- Vim with |python3| and |terminal| support
+- LLDB and pdb integration via ~/.lldbinit and ~/.pdbrc (see |vimdbg-setup|)
+
+==============================================================================
+SETUP                                                *vimdbg-setup*
+
+LLDB — add to ~/.lldbinit: >
+    command script import ~/.vim/pack/drpriver/start/vimdbg/lldb/vimdbg_lldb.py
+<
+pdb — ~/.pdbrc: >
+    !__import__('os').environ.get('VIM_TERMINAL') and (__import__('sys').path.insert(0, __import__('os').path.expanduser('~/.vim/pack/drpriver/start/vimdbg/pdb')) or __import__('vimdbg_pdb').setup(__import__('sys')._getframe(1).f_locals['self']))
+<
+==============================================================================
+USAGE                                                *vimdbg-usage*
+
+1. (Optional) Set breakpoints with <F8>.
+2. Open a terminal split.
+3. Start the debugger in the terminal.
+4. Debug mode activates when a breakpoint is hit.
+5. Use the key bindings to control the debugger or just type in debugger
+   commands in the terminal as normal.
+
+ vim:tw=78:ft=help:norl:

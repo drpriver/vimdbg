@@ -56,6 +56,10 @@ function g:Tapi_threads(_, arglist)
     python3 vimdbg.show_threads(vim.eval('a:arglist[0]'))
 endfunction
 
+function g:Tapi_socket(_, arglist)
+    execute "python3 vimdbg.set_socket('" . a:arglist[0] . "')"
+endfunction
+
 " Popup selection highlight (underline, only affects popups)
 hi PopupSelected cterm=underline gui=underline ctermbg=NONE guibg=NONE
 

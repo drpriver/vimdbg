@@ -102,7 +102,16 @@ def btv(debugger, command, result, internal_dict):
     frames = []
     for i in range(thread.GetNumFrames()):
         frame = thread.GetFrameAtIndex(i)
-        func = frame.GetFunctionName() or '???'
+        func = frame.GetDisplayFunctionName() or '???'
+        args = frame.GetVariables(True, False, False, False)
+        if args.GetSize() > 0:
+            parts = []
+            for j in range(args.GetSize()):
+                arg = args.GetValueAtIndex(j)
+                name = arg.GetName() or '?'
+                val = arg.GetSummary() or arg.GetValue() or '?'
+                parts.append(f'{name}={val}')
+            func = f'{func}({", ".join(parts)})'
         le = frame.GetLineEntry()
         f = le.GetFileSpec()
         if f.fullpath:
@@ -132,7 +141,68 @@ def register(debugger):
     debugger.HandleCommand(f'command script add -f {modname}.localv localv')
     debugger.HandleCommand(f'command script add -f {modname}.threadv threadv')
     debugger.HandleCommand(f'target stop-hook add -P {modname}.StopHook')
+    debugger.HandleCommand('settings set stop-line-count-before 0')
+    debugger.HandleCommand('settings set stop-line-count-after 0')
+    debugger.HandleCommand('settings set auto-confirm true')
+    debugger.HandleCommand(r'settings set frame-format ""')
+    debugger.HandleCommand(r'settings set thread-stop-format ""')
+
+import threading
+import socket
+import tempfile
+
+_server_thread = None
+_server_socket = None
+
+import atexit
+def _cleanup_socket():
+    if _server_socket:
+        addr = _server_socket.getsockname()
+        _server_socket.close()
+        if isinstance(addr, str):
+            try:
+                os.unlink(addr)
+            except:
+                pass
+atexit.register(_cleanup_socket)
+
+def _start_cmd_server(debugger):
+    global _server_thread, _server_socket
+    if hasattr(socket, 'AF_UNIX'):
+        sock_path = os.path.join(tempfile.gettempdir(), f'vimdbg_lldb_{os.getpid()}.sock')
+        try:
+            os.unlink(sock_path)
+        except FileNotFoundError:
+            pass
+        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        srv.bind(sock_path)
+        addr_for_vim = sock_path
+    else:
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.bind(('127.0.0.1', 0))
+        addr_for_vim = f'127.0.0.1:{srv.getsockname()[1]}'
+    srv.listen(1)
+    _server_socket = srv
+    def serve():
+        while True:
+            conn, _ = srv.accept()
+            data = b''
+            while True:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    break
+                data += chunk
+            conn.close()
+            for line in data.decode().strip().split('\n'):
+                line = line.strip()
+                if line:
+                    debugger.HandleCommand(line)
+    _server_thread = threading.Thread(target=serve, daemon=True)
+    _server_thread.start()
+    js = json.dumps(['call', 'Tapi_socket', [addr_for_vim]])
+    print('\033]51;', js, '\07', end='', sep='', flush=True)
 
 def __lldb_init_module(debugger, internal_dict):
     if os.environ.get('VIM_TERMINAL'):
         register(debugger)
+        _start_cmd_server(debugger)

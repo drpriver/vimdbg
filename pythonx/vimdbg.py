@@ -1,6 +1,7 @@
 from __future__ import annotations
 import vim
 import os
+import socket
 from typing import Callable, NamedTuple
 
 class Location(NamedTuple):
@@ -169,6 +170,31 @@ class SignLoc(NamedTuple):
 _next_sign_id = 1
 _pending_breakpoints: dict[Location, bool] = {}
 _pending_bp_signs: dict[SignLoc, int] = {}
+_cmd_socket_addr = None  # str (unix path) or (host, port) tuple
+
+def set_socket(addr:str) -> None:
+    global _cmd_socket_addr
+    if ':' in addr and not os.path.exists(addr):
+        host, port = addr.rsplit(':', 1)
+        _cmd_socket_addr = (host, int(port))
+    else:
+        _cmd_socket_addr = addr
+
+def _send_socket(cmd:str) -> bool:
+    """Send a command over the socket. Returns True on success."""
+    if _cmd_socket_addr is None:
+        return False
+    try:
+        if isinstance(_cmd_socket_addr, tuple):
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        else:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.connect(_cmd_socket_addr)
+        s.sendall(cmd.encode())
+        s.close()
+        return True
+    except:
+        return False
 
 _active_popup = None  # type: _Popup | None
 
@@ -258,6 +284,8 @@ class DebugState:
         quoted = {k: self.flavor.quote(v) if isinstance(v, str) else v
                   for k, v in kwargs.items()}
         text = template.format(**quoted)
+        if _send_socket(text):
+            return
         for line in text.split('\n'):
             escaped = line.replace('\\', '\\\\').replace('"', '\\"')
             cmd = f'call term_sendkeys({self.bufid}, "{escaped}\\<Enter>")'
@@ -349,22 +377,29 @@ class DebugState:
             self._send(self.flavor.threads)
 
     def show_backtrace(self, frames:list) -> None:
-        entries = []
+        # Compute column widths for alignment
+        locs = []
+        max_loc = 0
         for f in frames:
-            idx, func, path, line = f[0], f[1], f[2], f[3]
-            prefix = f"#{idx} "
-            fc = len(prefix) + 1
-            fl = len(func)
+            path = f[2]
             if path:
-                short = os.path.basename(path)
-                loc = f"  {short}:{line}"
-                lc = len(prefix) + len(func) + 1
-                ll = len(loc)
-                text = f"{prefix}{func}{loc}".replace("'", "''")
-                entries.append(f"{{'text':'{text}','props':[{{'col':{fc},'length':{fl},'type':'bt_func'}},{{'col':{lc},'length':{ll},'type':'bt_loc'}}]}}")
+                loc = f"{os.path.basename(path)}:{f[3]}"
             else:
-                text = f"{prefix}{func}".replace("'", "''")
-                entries.append(f"{{'text':'{text}','props':[{{'col':{fc},'length':{fl},'type':'bt_func'}}]}}")
+                loc = ''
+            locs.append(loc)
+            max_loc = max(max_loc, len(loc))
+        entries = []
+        for i, f in enumerate(frames):
+            idx, func = f[0], f[1]
+            loc = locs[i].ljust(max_loc) if locs[i] else ' ' * max_loc
+            prefix = f"#{idx} "
+            text = f"{prefix}{loc}  {func}".replace("'", "''")
+            lc = len(prefix) + 1
+            ll = len(loc)
+            fc = len(prefix) + max_loc + 3
+            fl = len(func)
+            props = f"[{{'col':{lc},'length':{ll},'type':'bt_loc'}},{{'col':{fc},'length':{fl},'type':'bt_func'}}]"
+            entries.append(f"{{'text':'{text}','props':{props}}}")
         def on_select(idx):
             self._send(self.flavor.frame_select, idx=frames[idx][0])
         _show_popup(entries, 'backtrace', on_select)
